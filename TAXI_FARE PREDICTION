@@ -1,1 +1,239 @@
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+df=pd.read_csv('train_NYTaxi.csv')
+df.head()
+x=df
+x
+
+x.info()
+
+x.describe()
+
+
+x=x.loc[df['pickup_latitude'].between(40,42)]
+x=x.loc[df['pickup_longitude'].between(-75,-72)]
+x=x.loc[df['dropoff_latitude'].between(40,42)]
+x=x.loc[df['dropoff_longitude'].between(-75,-72)]
+x=x.loc[df['fare_amount'].between(min_th,max_th)]
+x=x.loc[df['passenger_count']>0]
+x.describe()
+
+x.isnull().any()
+
+x.hist(bins=50, figsize=(15,12))
+plt.show()
+
+import folium
+
+nyk_pickup_location=folium.Map(location=[-40.73060,-73.935242],zoom_start=12,tiles='OpenStreetMap')
+for i in x.index[:500]:
+    folium.CircleMarker(location=[x['dropoff_latitude'][i],x['dropoff_longitude'][i]],color="red").add_to(nyk_pickup_location)
+nyk_pickup_location  
+
+for i in df.index[:500]:
+    folium.CircleMarker(location=[df['pickup_latitude'][i],df['pickup_longitude'][i]],color='green').add_to(nyk_pickup_location)
+nyk_pickup_location
+
+##now i have to do data scaling
+from sklearn.preprocessing import MinMaxScaler
+def scaling(data):
+    scaler= MinMaxScaler()
+    data['fare_amount']=scaler.fit_transform((data[['fare_amount']]))
+scaling(x)
+x.head()
+
+
+from sklearn.base import BaseEstimator, TransformerMixin
+class add_features(BaseEstimator, TransformerMixin):
+    # We are calculating three new features. we are taking which combinations to take or leave
+    def __init__(self, year=True,H_distance=True, month=True,day=True,dayofweek=True,hour=True):
+        self.year = year
+        self.H_distance = H_distance
+        self.month = month
+        self.day = day
+        self.dayofweek = dayofweek
+        self.hour = hour
+    def fit(self, data, y=None):
+        return self
+    def transform(self, data):
+        data['pickup_datetime']=pd.to_datetime(data['pickup_datetime'],errors='coerce')
+        R=6371
+        phi1 = np.radians(data['pickup_latitude'])
+        phi2 = np.radians(data["dropoff_latitude"])
+        delta_phi = np.radians(data['pickup_latitude']-data["dropoff_latitude"])
+        delta_lambda = np.radians(data["pickup_longitude"]-data["dropoff_longitude"])
+        a = np.sin(delta_phi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2.0) ** 2
+        c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+        d = (R * c)
+        if self.H_distance:
+            data["H_distance"]=d
+        if self.year:
+            data['Year'] = data['pickup_datetime'].dt.year
+        if self.month:
+            data['Year'] = data['pickup_datetime'].dt.month   
+        if self.day:
+            data['day'] = data['pickup_datetime'].dt.day
+        if self.dayofweek:
+            data['dayofweek'] = data['pickup_datetime'].dt.dayofweek
+        if self.hour:
+            data['hour'] = data['pickup_datetime'].dt.hour
+        l=['key','pickup_datetime','pickup_longitude','pickup_latitude','dropoff_longitude','dropoff_latitude']
+        for i in l:
+            data=data.drop(i,axis=1)
+               
+        print("yes")
+        return data
+
+x_train = x.drop("fare_amount", axis=1)   # Training feature
+y_train = x["fare_amount"].copy()
+x_train
+
+y_train
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+pre_pipe = Pipeline([
+    ('attribs_adder', add_features()),
+
+    
+])
+
+
+i have built pipeline using fit and transfrom
+
+x_prep = pre_pipe.fit_transform(x_train)
+x_prep
+from sklearn.preprocessing import StandardScaler
+ob=StandardScaler()
+scale=ob.fit_transform(x_prep)
+x_train=scale
+x_train
+
+x_prep.shape
+
+
+test_data=pd.read_csv('test_NYTaxi.csv')
+x_new=test_data
+
+test_data
+
+x_new
+
+
+x_new_prep=pre_pipe.transform(test_data)
+x_new_prep
+test_x=np.c_[np.ones((9914, 1)), x_new_prep]
+test_x
+
+ob=StandardScaler()
+scale=ob.fit_transform(test_x)
+scale
+
+scale.shape
+x_prep
+
+def model(x_train,y_train):
+    x_train= np.c_[np.ones((86224, 1)), x_train]  
+    theta_best = np.linalg.inv(x_train.T.dot(x_train)).dot(x_train.T).dot(y_train)
+    return theta_best
+
+
+now let me check corrrealtion such that i can drop which is poorly coorelted with target columns
+
+corr_matrix = x_prep.corr()
+corr_matrix["H_distance"].sort_values(ascending=False)
+
+
+here i see mostly dayofwwek is affecting distance somewhat and rest of features dont keep importance that much
+
+lets first prediction the fare usingb matrix method
+
+theta_best=model(x_train,y_train)
+theta_best
+
+theta_best.shape
+
+def predict(data):
+    data= np.c_[np.ones((len(data), 1)), data] # add x0 = 1 to each instance
+    y_predict = data.dot(theta_best)
+    return y_predict
+
+y=predict(scale)
+
+y.shape
+
+y
+
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+train_x,train_y,test_x,test_y=train_test_split(x_train,y_train,test_size=.30,random_state=0)
+model=LinearRegression()
+from sklearn.model_selection import KFold
+kfold_val=KFold(10)
+from sklearn.model_selection import cross_val_score
+res=cross_val_score(model,x_train,y_train,cv=kfold_val)
+np.mean(res)
+
+lin_reg = LinearRegression()
+lin_reg.fit(x_train, y_train)
+lin_reg.intercept_, lin_reg.coef_
+lin
+
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split
+train_x,train_y,test_x,test_y=train_test_split(x_train,y_train,test_size=.30,random_state=0)
+model=DecisionTreeRegressor()
+from sklearn.model_selection import KFold
+kfold_val=KFold(10)
+from sklearn.model_selection import cross_val_score
+res=cross_val_score(model,x_train,y_train,cv=kfold_val)
+np.mean(res)
+
+
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
+model = RandomForestRegressor()
+kfold_val=KFold(10)
+res=cross_val_score(model,x_train,y_train,cv=kfold_val)
+sore=np.mean(res)
+
+from sklearn.tree import DecisionTreeRegressor 
+l=[]
+for i in range(10):
+    regressor = DecisionTreeRegressor(random_state =i) 
+    reg=regressor.fit(x_train, y_train)
+    l.append(reg.predict(scale))
+
+print(l)
+##scale is our test_data 
+for i in l:
+    print(l)
+
+here i have built 10 k_fold  taking 10 diffrent random state
+corressponding to each we got prediction  and i have append it to list l
+
+y_pred = regressor.predict(scale)
+
+y_pred
+
+y_pred.shape
+
+this prediction by decision tree regressor 
+
+import math
+from sklearn.metrics import mean_squared_error 
+from sklearn.neighbors import KNeighborsRegressor
+model = KNeighborsRegressor(n_neighbors=8)
+model.fit(x_train,y_train)
+pred_y = model.predict(scale)
+score=model.score(x_train,y_train)
+print(score)
+
+
+we can see the highest accuracy we got is 76.1% uisng knn regression algorithm ,i have taken first 8 distance of correspoonding x_train y_train, and take avg of that ,thats how knn works
+
